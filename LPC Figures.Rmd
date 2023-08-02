@@ -1,0 +1,330 @@
+---
+title: "LPC Study"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+date: "2022-09-15"
+---
+
+```{r LoadPackages, include = FALSE}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(xlsx)
+library(scales)
+library(pastecs)
+```
+
+```{r Descriptive stats for pilot study, echo=FALSE}
+LPC_Count_Summary <- read_excel("LPC Count Summary.xlsx")
+
+LPC_Count_Summary <- LPC_Count_Summary %>%
+  mutate('log_cfu' = log10(`LPC (cfu/ml)`))
+
+Fresh_vs_Frozen_boxplot <- ggplot(LPC_Count_Summary, aes ( x= `Sample Type` , y= `log_cfu`)) + 
+  geom_boxplot() + 
+  ylab("LPC (log CFU/mL)") +
+  stat_summary(geom = "errorbar", fun.min = mean, fun = mean, fun.max = mean, width = .75, color = "red")+
+  theme_bw() 
+
+Fresh_vs_Frozen_boxplot
+
+
+LPC_Count_Summary <- read_excel("LPC Count Summary.xlsx")
+
+LPC_Count_Summary <- LPC_Count_Summary %>%
+  pivot_wider(names_from = 'Sample Type' , values_from = 'LPC (cfu/ml)') %>%
+  rename('Fresh LPC (CFU/mL)' = 'Fresh') %>%
+  rename('Frozen LPC (CFU/mL)' = 'Frozen') %>%
+  mutate('Fresh LPC (log CFU/mL)' = log10(`Fresh LPC (CFU/mL)`)) %>%
+  mutate('Frozen LPC (log CFU/mL)' = log10(`Frozen LPC (CFU/mL)`))
+
+stat.desc(LPC_Count_Summary,norm=TRUE)
+```
+
+```{r Bacterial characterization of fresh and frozen isolates, echo=FALSE}
+LPC_Pilot_16S_IDs <- read_excel("LPC Pilot 16S IDs.xlsx")
+
+table(LPC_Pilot_16S_IDs$Type,LPC_Pilot_16S_IDs$`16S Genus`)
+Type_by_Genus=prop.table(table(LPC_Pilot_16S_IDs$Type,LPC_Pilot_16S_IDs$`16S Genus`), margin=1)
+Type_by_Genus=as.data.frame(Type_by_Genus)
+
+Fresh_Frozen_characterizations <- ggplot(Type_by_Genus,aes(x=Var1,fill=Var2,y=Freq))+
+  geom_bar(position="stack", stat="identity")+
+  ggtitle("Bacterial Characterization from Fresh and Frozen Raw Milk")+
+  ylab("Proportion")+
+  xlab("Sample Type")+
+  labs(fill="Key")+
+  scale_fill_manual(values = c("#D1BBD7", "#882E72", "#1965B0", "#7BAFDE", "#4EB265","#90C987", "#CAE0AB", "#F7F056", "#F6C141","#F1932D", "#E8601C", "#FFB5E4", "#E3589A"))+
+  theme_bw()+
+  theme(legend.text = element_text(face = "italic"))
+
+Fresh_Frozen_characterizations
+```
+
+```{r LPC Isolates Data Organization, echo=FALSE}
+Isolates_Query <- read_excel("Isolates Query.xlsx")
+
+Isolates_Query <- Isolates_Query %>%
+  replace_na(list(Family="F.")) %>%
+  replace_na(list(Genus="G.")) %>%
+  mutate(log_concentration = log10(Average_Concentration)) %>%
+  relocate(log_concentration, .after = Average_Concentration)
+
+df_1 <- Isolates_Query %>%
+  group_by(ID, R_LPCsurface, Average_Concentration, Total_Colony_Count, Order, Family, Genus) %>%
+  summarise(n_isolates = n()) %>%
+  pivot_wider(names_from = R_LPCsurface, values_from = n_isolates) %>%
+  replace_na(list(surface = 0, subsurface = 0))
+
+df_1a <- df_1 %>%
+  group_by(ID) %>%
+  summarise(sum_surface = sum(surface),
+            sum_subsurface = sum(subsurface)) %>%
+  right_join(df_1) %>%
+  mutate(proportion_surface = surface/sum_surface, proportion_subsurface = subsurface/sum_subsurface)
+  
+df_2 <- Isolates_Query %>%
+  distinct(ID, Surface, Subsurface) %>%
+  mutate(prop_surface = Surface/(Surface + Subsurface),
+         prop_subsurface = Subsurface/(Surface + Subsurface))
+
+df_3 <- df_1a %>%
+  left_join(df_2, by = c("ID")) %>%
+  replace_na(list(proportion_surface = 0, proportion_subsurface = 0)) %>%
+  mutate(adjusted_proportion = (proportion_surface * prop_surface) + (proportion_subsurface * prop_subsurface))
+
+df_4 <-df_3 %>%
+  mutate(Organism_Type = 
+           case_when(
+              Genus == "Bacillus" ~ "Gram positive sporeformer",
+              Genus == "Paenibacillus" ~ "Gram positive sporeformer",
+              Genus == "Lysinibacillus" ~ "Gram positive sporeformer",
+              Genus == "Alkalihalobacillus" ~ "Gram positive sporeformer",
+              Genus == "Brachybacterium" ~ "Gram positive nonsporeformer",
+              Genus == "Enterococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Kocuria" ~ "Gram positive nonsporeformer",
+              Genus == "Microbacterium" ~ "Gram positive nonsporeformer",
+              Genus == "Micrococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Staphylococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Streptococcus" ~ "Gram positive nonsporeformer",
+              Family == "Moraxellaceae" ~ "Gram negative",
+              Family == "Neisseriaceae" ~ "Gram negative",
+              Family == "Bacillaceae" ~ "Gram positive sporeformer",
+              Family == "Paenibacillaceae" ~ "Gram positive sporeformer",
+              Family == "Micrococcaceae" ~ "Gram positive nonsporeformer",
+              Order == "Bacillales" ~ "No Reliable ID")) %>%
+  mutate(log_concentration = log10(Average_Concentration))
+
+LPC_Isolates <- df_4 %>%
+  summarise(ID, Total_Colony_Count, Average_Concentration, log_concentration, Surface, Subsurface, adjusted_proportion, Family, Genus, Organism_Type)
+```
+
+```{r Descriptive stats for LPC isolates, echo=FALSE}
+LPC_Concentration <- Isolates_Query %>%
+  distinct(ID, Average_Concentration) %>%
+  mutate(log_concentration = log10(Average_Concentration))
+
+stat.desc(LPC_Concentration$log_concentration)
+
+table(Isolates_Query$Genus)
+prop.table(table(Isolates_Query$Genus))
+```
+
+```{r Proportion of surface to subsurface colonies, fig.height=6, fig.width=8, echo=FALSE}
+Isolates_Query_1 <- Isolates_Query %>%
+  mutate(Genus_2 = Genus) 
+Isolates_Query_1$Genus_2[Isolates_Query_1$Genus_2 == 'G.' & Isolates_Query_1$Family == 'Bacillaceae'] <- "Other Bacillaceae"
+Isolates_Query_1$Genus_2[Isolates_Query_1$Genus_2 == 'G.' & Isolates_Query_1$Family == 'Paenibacillaceae'] <- "Other Paenibacillaceae"
+Isolates_Query_1$Genus_2[Isolates_Query_1$Genus_2 == 'G.' & Isolates_Query_1$Family == 'Micrococcaceae'] <- "Other Micrococcaceae"
+Isolates_Query_1$Genus_2[Isolates_Query_1$Genus_2 == 'G.' & Isolates_Query_1$Family == 'Moraxellaceae'] <- "Family:Moraxellaceae"
+Isolates_Query_1$Genus_2[Isolates_Query_1$Genus_2 == 'G.' & Isolates_Query_1$Order == 'Bacillales'] <- "Order:Bacillales"
+  
+table(Isolates_Query_1$Genus_2,Isolates_Query_1$R_LPCsurface)
+prop.table(table(Isolates_Query_1$Genus_2,Isolates_Query_1$R_LPCsurface),margin=1)
+prop.table(table(Isolates_Query_1$Genus_2,Isolates_Query_1$R_LPCsurface))
+Surface_Freq=table(Isolates_Query_1$Genus_2,Isolates_Query_1$R_LPCsurface)
+Surface_Freq=as.data.frame(Surface_Freq)
+levels(Surface_Freq$Var2) <- c("Sub-surface","Surface")
+Surface_Freq$Var2 <- factor(Surface_Freq$Var2,levels=c("Surface","Sub-surface"))
+
+Surface_vs_Subsurface <- ggplot(Surface_Freq,aes(x=reorder(Var1,Freq),fill=Var2,y=Freq))+
+  geom_col()+
+  coord_flip()+
+  ggtitle("Proportion of Characterized Surface and Sub-surface Colonies")+
+  ylab("Frequency")+
+  xlab("Bacterial Identification")+
+  labs(fill="Key")+
+  theme(axis.text.y = element_text(face = "italic"))+
+  geom_text(data=subset(Surface_Freq,Freq != 0),aes(label=Freq, y = Freq), size=3,
+            position = position_stack(vjust = .5))
+Surface_vs_Subsurface
+```
+
+```{r Proportion of organism types in the isolates, echo=FALSE}
+Isolates_Query_2 <- Isolates_Query_1 %>%
+  mutate(Organism_Type = 
+           case_when(
+              Genus == "Bacillus" ~ "Gram positive sporeformer",
+              Genus == "Paenibacillus" ~ "Gram positive sporeformer",
+              Genus == "Lysinibacillus" ~ "Gram positive sporeformer",
+              Genus == "Alkalihalobacillus" ~ "Gram positive sporeformer",
+              Genus == "Brachybacterium" ~ "Gram positive nonsporeformer",
+              Genus == "Enterococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Kocuria" ~ "Gram positive nonsporeformer",
+              Genus == "Microbacterium" ~ "Gram positive nonsporeformer",
+              Genus == "Micrococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Staphylococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Streptococcus" ~ "Gram positive nonsporeformer",
+              Family == "Moraxellaceae" ~ "Gram negative",
+              Family == "Neisseriaceae" ~ "Gram negative",
+              Family == "Bacillaceae" ~ "Gram positive sporeformer",
+              Family == "Paenibacillaceae" ~ "Gram positive sporeformer",
+              Family == "Micrococcaceae" ~ "Gram positive nonsporeformer",
+              Order == "Bacillales" ~ "No Reliable ID"))
+
+table(Isolates_Query_2$Organism_Type)
+prop.table(table(Isolates_Query_2$Organism_Type))
+```
+
+```{r histogram for LPC distribution, echo=FALSE}
+LPC_Distribution_histogram <- ggplot(LPC_Concentration, aes(x = log_concentration)) + 
+    geom_histogram(aes(y =..density..),
+                   breaks = seq(0, 5, by = 0.2), 
+                   colour = "black", 
+                   fill = "white") + xlab("LPC (log CFU/mL)") + ggtitle("LPC Distribution") +
+stat_function(fun = dnorm, args = list(mean = mean(LPC_Concentration$log_concentration), sd = sd(LPC_Concentration$log_concentration)))
+
+LPC_Distribution_histogram
+```
+
+```{r Relative proportions of organism type based on log concentration, echo=FALSE}
+Isolates_Query_3 <- df_4 %>%
+  distinct(ID, Total_Colony_Count, log_concentration, adjusted_proportion, Genus, Organism_Type) %>%
+  group_by(ID) %>%
+  mutate(Adj_prop_gp_spore = sum(adjusted_proportion[Organism_Type == "Gram positive sporeformer"])) %>%
+  mutate(Adj_prop_gp_non_spore = sum(adjusted_proportion[Organism_Type == "Gram positive nonsporeformer"]))%>%
+  mutate(Adj_prop_gn = sum(adjusted_proportion[Organism_Type == "Gram negative"])) %>%
+  mutate(Adj_prop_no_id = sum(adjusted_proportion[Organism_Type == "No Reliable ID"])) %>%
+  distinct(ID, Adj_prop_gp_spore, Adj_prop_gp_non_spore, Adj_prop_gn, Adj_prop_no_id,log_concentration)
+  
+Isolates_Query_4 <- Isolates_Query_3 %>%
+  pivot_longer(cols=c('Adj_prop_gp_spore','Adj_prop_gp_non_spore','Adj_prop_gn', 'Adj_prop_no_id'), names_to = "Organism_Type", values_to = "Proportion") 
+  
+Isolates_Query_5 <- Isolates_Query_4 %>%
+  group_by(ID) %>% 
+     mutate(adj_log_concentration = if_else(Proportion > 0, log_concentration * Proportion,0))
+
+Isolates_Query_5 <- Isolates_Query_4 %>%
+  group_by(ID) %>% 
+     summarise(.,log_cfu = sum(Proportion)) %>%
+     left_join(.,Isolates_Query_4) %>%
+     mutate(adj_log_concentration = if_else(Proportion > 0, log_concentration * Proportion / log_cfu,0))
+  
+Relative_Proportions <- ggplot(Isolates_Query_5, aes(x = reorder(ID,adj_log_concentration), y = adj_log_concentration))+
+     geom_col(aes(fill = Organism_Type))+
+  xlab("")+
+  ylab("LPC (log CFU/mL)")+
+  ggtitle("Relative Proportions of Organism Type Based on LPC")+
+    scale_fill_discrete(name="Organism Type", labels=c("Gram-negative","Gram-positive non-sporeformer","Gram-positive sporeformer","No Reliable ID"))+
+  theme(axis.ticks.x=element_blank(),
+        axis.text.x=element_blank())
+
+Relative_Proportions
+```
+
+```{r, echo=FALSE}
+Characterized_Isolates <- Isolates_Query %>%
+  replace_na(list(Genus= 'G.' )) %>%
+  replace_na(list(Family= 'F.' )) %>%
+  mutate(Organism_Type = 
+           case_when(
+              Genus == "Bacillus" ~ "Gram positive sporeformer",
+              Genus == "Paenibacillus" ~ "Gram positive sporeformer",
+              Genus == "Lysinibacillus" ~ "Gram positive sporeformer",
+              Genus == "Alkalihalobacillus" ~ "Gram positive sporeformer",
+              Genus == "Brachybacterium" ~ "Gram positive nonsporeformer",
+              Genus == "Enterococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Kocuria" ~ "Gram positive nonsporeformer",
+              Genus == "Microbacterium" ~ "Gram positive nonsporeformer",
+              Genus == "Micrococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Staphylococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Streptococcus" ~ "Gram positive nonsporeformer",
+              Family == "Moraxellaceae" ~ "Gram negative",
+              Family == "Neisseriaceae" ~ "Gram negative",
+              Family == "Bacillaceae" ~ "Gram positive sporeformer",
+              Family == "Paenibacillaceae" ~ "Gram positive sporeformer",
+              Family == "Micrococcaceae" ~ "Gram positive nonsporeformer",
+              Family == "F." ~ "No Reliable ID"))%>%
+  
+  
+  group_by(ID)%>%
+  mutate(Characterized_sporeformers = sum(Organism_Type =="Gram positive sporeformer"))%>%
+  mutate(Characterized_nonsporeformers = sum(Organism_Type =="Gram positive nonsporeformer"))%>%
+  mutate(Characterized_Gram_negative = sum(Organism_Type =="Gram negative"))%>%
+  mutate(Characterized_no_ID = sum(Organism_Type =="No Reliable ID")) %>%
+  distinct(ID,Characterized_sporeformers,Characterized_nonsporeformers,Characterized_Gram_negative,Characterized_no_ID)%>%
+  mutate(Characterized=sum(Characterized_sporeformers,Characterized_nonsporeformers,Characterized_Gram_negative,Characterized_no_ID))
+
+Estimated_Plate_IDs <- df_4 %>%
+  summarise(ID, Total_Colony_Count, sum_surface, sum_subsurface, adjusted_proportion, Organism_Type) %>%
+  group_by(ID) %>%
+  replace_na(list(Organism_Type='No_Reliable_ID')) %>%
+  replace_na(list(Genus="G.")) %>%
+  replace_na(list(Family="F.")) %>% 
+  group_by(ID) %>%
+  mutate(Estimated_Colony_Count = Total_Colony_Count * adjusted_proportion) %>%
+  mutate(Estimated_sporeformers = sum(Estimated_Colony_Count[Organism_Type == "Gram positive sporeformer"])) %>%
+  mutate(Estimated_nonsporeformers = sum(Estimated_Colony_Count[Organism_Type =="Gram positive nonsporeformer"]))%>%
+  mutate(Estimated_Gram_negative = sum(Estimated_Colony_Count[Organism_Type =="Gram negative"]))%>%
+  mutate(Estimated_no_ID = sum(Estimated_Colony_Count[Organism_Type =="No Reliable ID"])) 
+
+Colony_Characterization <- Estimated_Plate_IDs %>%
+  left_join(Characterized_Isolates, by=c("ID"))%>%
+  distinct(ID,Total_Colony_Count,Characterized, Characterized_sporeformers, Characterized_nonsporeformers, Characterized_Gram_negative, Characterized_no_ID, Estimated_sporeformers, Estimated_nonsporeformers, Estimated_Gram_negative, Estimated_no_ID)
+
+Colony_Characterization = as.data.frame(Colony_Characterization)
+write.xlsx(Colony_Characterization, "Colony Characterization.xlsx")
+```
+
+```{r}
+X16S_vs_MALDI <- read_excel("16S vs MALDI.xlsx")
+
+Compare_IDs=prop.table(table(X16S_vs_MALDI$`MALDI-TOF Genus ID`,X16S_vs_MALDI$`16S Genus ID`),margin=1) %>% 
+  round(digits=2) 
+Compare_IDs=as.data.frame(Compare_IDs)
+Compare_IDs 
+
+Compare_IDs$Var2 <- factor(Compare_IDs$Var2, levels=c("Bacillus", "Alkalihalobacillus", "Lysinibacillus",  "Other Bacillaceae", "Order: Bacillales", "Paenibacillus", "Other Paenibacillaceae", "Brachybacterium", "Kocuria", "Streptococcus", "Staphylococcus", "Enterococcus", "Micrococcus", "Other Micrococcaceae", "Microbacterium", "Neisseria", "Family: Moraxellaceae"))
+Compare_IDs$Var1 <- factor(Compare_IDs$Var1, levels=c("Bacillus","Paenibacillus","Lysinibacillus", "Niallia", "Brachybacterium", "Kocuria", "Streptococcus", "Staphylococcus", "Enterococcus", "Micrococcus", "Microbacterium", "Ornithinimicrobium", "Moraxella", "No Reliable ID"))
+
+ggplot(as.data.frame(Compare_IDs), aes(Var2, Var1, fill= Freq)) + 
+  geom_tile()+
+  xlab("16S ID")+
+  ylab("MALDI-TOF MS ID")+
+  scale_fill_distiller()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = sprintf("%.2f", Freq)),size=3)+
+  scale_x_discrete(labels=c("Bacillus" = "Bacillus (n=168)", "Alkalihalobacillus" = "Alkalihalobacillus (n=1)", "Lysinibacillus" = "Lysinibacillus (n=1)", "Other Bacillaceae" = "Other Bacillaceae (n=16)", "Order: Bacillales" = "Order: Bacillales (n=2)", "Paenibacillus" = "Paenibacillus (n=13)", "Other Paenibacillaceae" = "Other Paenibacillaceae (n=1)", "Brachybacterium" = "Brachybacterium (n=56)", "Kocuria" = "Kocuria (n=47)", "Streptococcus" = "Streptococcus (n=30)", "Staphylococcus" = "Staphylococcus (n=3)", "Enterococcus" = "Enterococcus (n=2)", "Micrococcus" = "Micrococcus (n=1)", "Other Micrococcaceae" = "Other Micrococcaceae (n=10)", "Microbacterium" = "Microbacterium (n=20)", "Neisseria" = "Neisseria (n=1)", "Family: Moraxellaceae" = "Family: Moraxellaceae (n=8)")) +
+  scale_y_discrete(labels=c("Bacillus" =  "Bacillus (n=130)","Paenibacillus" = "Paenibacillus (n=6)", "Lysinibacillus" = "Lysinibacillus (n=3)", "Niallia" = "Niallia (n=1)", "Brachybacterium" = "Brachybacterium (n=56)", "Kocuria" = "Kocuria (n=46)", "Streptococcus" = "Streptococcus (n=19)", "Staphylococcus" = "Staphylococcus (n=2)", "Enterococcus" = "Enterococcus (n=2)", "Micrococcus" = "Micrococcus (n=5)", "Microbacterium" = "Microbacterium (n=9)", "Ornithinimicrobium" = "Ornithinimicrobium (n=1)", "Moraxella" = "Moraxella (n=8)", "No Reliable ID" = "No Reliable ID (n=92)"))
+
+ggsave("Heat map.pdf", width=10, height=7)
+
+```
+
+```{r}
+#logit transformation then back transform 
+library(car)
+library(emmeans)
+lmSpore = lm(logit(Adj_prop_gp_spore, adjust = 0.003) ~ log_concentration, data = Isolates_Query_3)
+
+
+summary(lmSpore)
+hist(residuals(lmSpore))
+plot(predict(lmSpore),residuals(lmSpore))
+
+emmip(lmSpore, ~log_concentration, at=list(log_concentration=seq(0.75,2.5,0.25)),CIs=TRUE,type="response") 
+
+emmeans(lmSpore, ~log_concentration, at=list(log_concentration=seq(0.75,2.5,0.25)),type="response")
+```
