@@ -1,2 +1,2 @@
 # LPC
-Characterization of thermoduric bacteria in contemporary raw milk supplies
+Repository for "Troubleshooting high laboratory pasteurization counts in raw milk requires characterization of dominant thermoduric bacteria"
