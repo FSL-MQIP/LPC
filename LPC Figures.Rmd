@@ -121,15 +121,27 @@ LPC_Isolates <- df_4 %>%
   summarise(ID, Total_Colony_Count, Average_Concentration, log_concentration, Surface, Subsurface, adjusted_proportion, Family, Genus, Organism_Type)
 ```
 
-```{r Descriptive stats for LPC isolates, echo=FALSE}
-LPC_Concentration <- Isolates_Query %>%
-  distinct(ID, Average_Concentration) %>%
-  mutate(log_concentration = log10(Average_Concentration))
-
-stat.desc(LPC_Concentration$log_concentration)
-
+```{r Descriptive stats and histogram for LPC isolates, echo=FALSE}
 table(Isolates_Query$Genus)
 prop.table(table(Isolates_Query$Genus))
+
+
+
+LPC_Concentrations <- read_excel("LPC Concentrations.xlsx")
+
+LPC_Concentrations <- LPC_Concentrations %>%
+  mutate(log_concentration = log10(Concentration))
+
+LPC_Distribution_histogram <- ggplot(LPC_Concentrations, aes(x = log_concentration)) + 
+    geom_histogram(aes(y =..density..),
+                   breaks = seq(0, 5, by = 0.2), 
+                   colour = "black", 
+                   fill = "white") + xlab("LPC (log CFU/mL)") + ggtitle("LPC Distribution") +
+stat_function(fun = dnorm, args = list(mean = mean(LPC_Concentrations$log_concentration), sd = sd(LPC_Concentrations$log_concentration)))
+
+LPC_Distribution_histogram
+
+stat.desc(LPC_Concentrations$log_concentration)
 ```
 
 ```{r Proportion of surface to subsurface colonies, fig.height=6, fig.width=8, echo=FALSE}
@@ -188,17 +200,6 @@ table(Isolates_Query_2$Organism_Type)
 prop.table(table(Isolates_Query_2$Organism_Type))
 ```
 
-```{r histogram for LPC distribution, echo=FALSE}
-LPC_Distribution_histogram <- ggplot(LPC_Concentration, aes(x = log_concentration)) + 
-    geom_histogram(aes(y =..density..),
-                   breaks = seq(0, 5, by = 0.2), 
-                   colour = "black", 
-                   fill = "white") + xlab("LPC (log CFU/mL)") + ggtitle("LPC Distribution") +
-stat_function(fun = dnorm, args = list(mean = mean(LPC_Concentration$log_concentration), sd = sd(LPC_Concentration$log_concentration)))
-
-LPC_Distribution_histogram
-```
-
 ```{r Relative proportions of organism type based on log concentration, echo=FALSE}
 Isolates_Query_3 <- df_4 %>%
   distinct(ID, Total_Colony_Count, log_concentration, adjusted_proportion, Genus, Organism_Type) %>%
@@ -234,6 +235,50 @@ Relative_Proportions <- ggplot(Isolates_Query_5, aes(x = reorder(ID,adj_log_conc
 Relative_Proportions
 ```
 
+```{r}
+Prop_gp_spore = Isolates_Query_5 %>% 
+  select(Organism_Type, Proportion) %>%
+  filter(Organism_Type == "Adj_prop_gp_spore") 
+mean(Prop_gp_spore$Proportion)
+
+Prop_gp_nonspore = Isolates_Query_5 %>% 
+  select(Organism_Type, Proportion) %>%
+  filter(Organism_Type == "Adj_prop_gp_non_spore") 
+mean(Prop_gp_nonspore$Proportion)
+
+Prop_gn = Isolates_Query_5 %>% 
+  select(Organism_Type, Proportion) %>%
+  filter(Organism_Type == "Adj_prop_gn") 
+mean(Prop_gn$Proportion)
+
+Prop_no_reliable_id = Isolates_Query_5 %>% 
+  select(Organism_Type, Proportion) %>%
+  filter(Organism_Type == "Adj_prop_no_id") 
+mean(Prop_no_reliable_id$Proportion)
+```
+
+```{r Adjusted proportions}
+df_5 <- df_4 %>%
+  mutate(adjusted_colony_counts =
+           df_4$adjusted_proportion * df_4$Total_Colony_Count)
+df_6_a <- df_5 %>%
+  distinct(ID, Order, Family, Genus, adjusted_colony_counts) %>%
+    group_by(Genus) %>%
+    summarise (adjusted_colony_counts_by_genus = sum(adjusted_colony_counts)) %>%
+    mutate (adjusted_proportions_by_genus = (adjusted_colony_counts_by_genus/sum(adjusted_colony_counts_by_genus))*100)
+
+df_6_b = df_5 %>% 
+  select(Order, Family, Genus, adjusted_colony_counts) %>%
+  filter(Genus == "G.") %>% 
+  group_by(Family) %>% 
+  summarise(adjusted_colony_counts_by_genus = sum(adjusted_colony_counts)) %>%
+  mutate(adjusted_proportions_by_genus = (adjusted_colony_counts_by_genus/sum(df_6_a$adjusted_colony_counts_by_genus))*100)
+
+bind_rows(df_6_a,df_6_b)
+```
+
+
+
 ```{r, echo=FALSE}
 Characterized_Isolates <- Isolates_Query %>%
   replace_na(list(Genus= 'G.' )) %>%
@@ -251,8 +296,8 @@ Characterized_Isolates <- Isolates_Query %>%
               Genus == "Micrococcus" ~ "Gram positive nonsporeformer",
               Genus == "Staphylococcus" ~ "Gram positive nonsporeformer",
               Genus == "Streptococcus" ~ "Gram positive nonsporeformer",
+              Genus == "Neisseria" ~ "Gram negative",
               Family == "Moraxellaceae" ~ "Gram negative",
-              Family == "Neisseriaceae" ~ "Gram negative",
               Family == "Bacillaceae" ~ "Gram positive sporeformer",
               Family == "Paenibacillaceae" ~ "Gram positive sporeformer",
               Family == "Micrococcaceae" ~ "Gram positive nonsporeformer",
@@ -295,6 +340,8 @@ Compare_IDs=prop.table(table(X16S_vs_MALDI$`MALDI-TOF Genus ID`,X16S_vs_MALDI$`1
   round(digits=2) 
 Compare_IDs=as.data.frame(Compare_IDs)
 Compare_IDs 
+Compare_IDs_test=table(X16S_vs_MALDI$`MALDI-TOF Genus ID`,X16S_vs_MALDI$`16S Genus ID`)
+Compare_IDs_test
 
 Compare_IDs$Var2 <- factor(Compare_IDs$Var2, levels=c("Bacillus", "Alkalihalobacillus", "Lysinibacillus",  "Other Bacillaceae", "Order: Bacillales", "Paenibacillus", "Other Paenibacillaceae", "Brachybacterium", "Kocuria", "Streptococcus", "Staphylococcus", "Enterococcus", "Micrococcus", "Other Micrococcaceae", "Microbacterium", "Neisseria", "Family: Moraxellaceae"))
 Compare_IDs$Var1 <- factor(Compare_IDs$Var1, levels=c("Bacillus","Paenibacillus","Lysinibacillus", "Niallia", "Brachybacterium", "Kocuria", "Streptococcus", "Staphylococcus", "Enterococcus", "Micrococcus", "Microbacterium", "Ornithinimicrobium", "Moraxella", "No Reliable ID"))
